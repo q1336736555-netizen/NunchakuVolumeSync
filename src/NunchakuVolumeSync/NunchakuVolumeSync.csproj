@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Volume.ico</ApplicationIcon>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Volume.ico" LogicalName="Volume.ico" />
+    <ProjectReference Include="../Nunchaku.Usb/Nunchaku.Usb.csproj" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <None Update="NAudio-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+</Project>
