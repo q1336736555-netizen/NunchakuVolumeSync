@@ -1,0 +1,8 @@
+2026-11-23T16:12:05.1165989+08:00 mode=--status log=logs/sync-20261123-161205-100-36404.log
+2026-11-23T16:12:05.1617096+08:00 container=<id> endpoint={0.0.0.00000000}.{<id>} name=扬声器 (iBasso DC-Nunchaku) defaultMultimedia=True
+2026-11-23T16:12:05.1700984+08:00 Windows level=2.0% dB=-51.00 mute=False hardwareSupport=0x3 (Volume, Mute)
+2026-11-23T16:12:05.1725986+08:00 hid=\\?\HID#VID_2FC6&PID_F0B9&MI_02#<instance>#{<id>} page=000C usage=0001 input=9 output=9 feature=0 reportId=0 payload=8
+2026-11-23T16:12:05.1779902+08:00 OUT request len=9 00-42-11-EE-00-00-00-00-00
+2026-11-23T16:12:05.1831265+08:00 OUT completed bytes=9
+2026-11-23T16:12:05.1886446+08:00 IN bytes=9 00-42-11-EE-00-04-04-00-00
+2026-11-23T16:12:05.1896807+08:00 hardware VOL=4
