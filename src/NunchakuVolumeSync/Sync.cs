@@ -47,13 +47,25 @@ internal static class Sync
             log($"hardware->Windows VOL={hardware} Windows={Percent(audio.MasterVolumeLevelScalar)} dB={audio.MasterVolumeLevel:F2} mute={audio.Mute}");
             showVolume?.Invoke(hardware);
         }
+        async Task<int> ReadHardware()
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                try { return await request(HidReports.Query); }
+                catch (TimeoutException) when (!lowTest)
+                {
+                    log($"Volume query timed out (attempt {attempt}). Retrying on the current endpoint.");
+                    await Task.Delay(100, stop);
+                }
+            }
+        }
         var listener = Listen();
         audio.OnVolumeNotification += OnWindows;
         try
         {
-            int hardware = await request(HidReports.Query);
+            int hardware = await ReadHardware();
             if (lowTest && hardware > 10) throw new IOException("Low-volume test requires hardware VOL <= 10.");
-            Display(hardware);
+            if (!events.Reader.TryPeek(out _)) Display(hardware);
             log($"READY limit={(lowTest ? 10 : 100)}");
             while (await events.Reader.WaitToReadAsync(stop))
             {
@@ -61,7 +73,7 @@ internal static class Sync
                 if (!events.Reader.TryRead(out var change)) continue;
                 if (change.Source == Origin.Knob)
                 {
-                    hardware = await request(HidReports.Query);
+                    hardware = await ReadHardware();
                     // A newer user action wins if it arrived during the round trip.
                     if (!events.Reader.TryPeek(out _)) Display(hardware);
                     continue;
@@ -69,7 +81,7 @@ internal static class Sync
                 int target = Percent(audio.MasterVolumeLevelScalar);
                 if (lowTest && target > 10)
                 {
-                    hardware = await request(HidReports.Query);
+                    hardware = await ReadHardware();
                     if (!events.Reader.TryPeek(out _)) Display(hardware);
                     continue;
                 }
@@ -77,25 +89,34 @@ internal static class Sync
                 {
                     // A mute-only or duplicate event usually needs no write. A concurrent knob change
                     // might have overwritten the previous state before its notification was processed.
-                    hardware = await request(HidReports.Query);
+                    hardware = await ReadHardware();
                     log($"Windows event level={target} mute={audio.Mute} hardware={hardware}");
                     if (target == hardware) continue;
                 }
                 if (events.Reader.TryPeek(out _)) continue;
-                var issuing = Stopwatch.GetTimestamp();
-                int feedback = await request(HidReports.SetVolume(target));
-                double toFeedback = Stopwatch.GetElapsedTime(change.Received).TotalMilliseconds;
-                int readback = await request(HidReports.Query);
-                hardware = readback;
-                double toIssue = Stopwatch.GetElapsedTime(change.Received, issuing).TotalMilliseconds;
-                log($"Windows->hardware target={target} feedback={feedback} readback={readback} eventToIssueMs={toIssue:F2} eventToFeedbackMs={toFeedback:F2}");
-                if (readback != target || feedback != target)
+                for (int attempt = 1; ; attempt++)
                 {
-                    if (events.Reader.TryPeek(out _)) continue;
-                    Display(readback);
-                    throw new IOException("SET feedback or independent readback differs from target.");
+                    if (events.Reader.TryPeek(out _) || Percent(audio.MasterVolumeLevelScalar) != target) break;
+                    int? feedback = null;
+                    var issuing = Stopwatch.GetTimestamp();
+                    try { feedback = await request(HidReports.SetVolume(target)); }
+                    catch (TimeoutException) { log("SET timed out. Reading hardware volume before retrying."); }
+                    double toFeedback = Stopwatch.GetElapsedTime(change.Received).TotalMilliseconds;
+                    hardware = await ReadHardware();
+                    double toIssue = Stopwatch.GetElapsedTime(change.Received, issuing).TotalMilliseconds;
+                    log($"Windows->hardware target={target} feedback={feedback?.ToString() ?? "missing"} readback={hardware} eventToIssueMs={toIssue:F2} eventToFeedbackMs={toFeedback:F2}");
+                    if (hardware == target)
+                    {
+                        showVolume?.Invoke(hardware);
+                        break;
+                    }
+                    if (events.Reader.TryPeek(out _) || Percent(audio.MasterVolumeLevelScalar) != target) break;
+                    if (feedback.HasValue || attempt >= 3)
+                    {
+                        Display(hardware);
+                        throw new IOException("Independent readback differs from target.");
+                    }
                 }
-                showVolume?.Invoke(readback);
             }
         }
         finally

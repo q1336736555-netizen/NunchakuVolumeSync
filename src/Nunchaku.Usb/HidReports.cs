@@ -13,10 +13,10 @@ public static class HidReports
         byte value = (byte)volume;
         return [0, 1, 0x10, 0xef, value, value, 0, 0, 0];
     }
-    public static async Task<int?> Exchange(FileStream input, SafeFileHandle output, byte[] request, Action<string> log, CancellationToken stop = default)
+    public static async Task<int?> Exchange(FileStream input, SafeFileHandle output, byte[] request, Action<string> log, CancellationToken stop = default, int timeoutMs = 3000)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
-        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        deadline.CancelAfter(timeoutMs);
         var pending = Read(input, log, deadline.Token);
         bool sent = false;
         try

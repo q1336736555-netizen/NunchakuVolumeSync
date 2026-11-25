@@ -95,7 +95,8 @@ internal static class Program
                 // A separate read handle starts with its own queue; the knob listener stays armed during requests.
                 using var handle = HidDevice.Open(hid, FileAccess.Read);
                 using var input = new FileStream(handle, FileAccess.Read, 1, true);
-                return await HidReports.Exchange(input, output, report, Log, stop) ?? throw new IOException("HID response timeout.");
+                int timeoutMs = bound.HasValue ? 1000 : 3000;
+                return await HidReports.Exchange(input, output, report, Log, stop, timeoutMs) ?? throw new TimeoutException("HID response timeout.");
             }
             if (args is ["--status"])
                 Log($"hardware VOL={await Request(HidReports.Query)}");
