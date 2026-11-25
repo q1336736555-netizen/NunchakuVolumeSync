@@ -89,17 +89,18 @@ internal static class Program
             Log($"Windows level={audio.MasterVolumeLevelScalar:P1} dB={audio.MasterVolumeLevel:F2} mute={audio.Mute} hardwareSupport=0x{(int)audio.HardwareSupport:X} ({audio.HardwareSupport})");
             using var output = HidDevice.Open(hid, FileAccess.Write);
             Log($"hid={hid} {HidDevice.CheckCaps(output)}");
-            async Task<int> Request(byte[] report)
+            async Task<int> Request(byte[] report, CancellationToken token)
             {
                 CheckRoute();
                 // A separate read handle starts with its own queue; the knob listener stays armed during requests.
                 using var handle = HidDevice.Open(hid, FileAccess.Read);
                 using var input = new FileStream(handle, FileAccess.Read, 1, true);
-                int timeoutMs = bound.HasValue ? 1000 : 3000;
-                return await HidReports.Exchange(input, output, report, Log, stop, timeoutMs) ?? throw new TimeoutException("HID response timeout.");
+                // SET normally acknowledges in under 30 ms. A missing ACK is resolved by readback.
+                int timeoutMs = !bound.HasValue ? 3000 : report[1] == 1 ? 100 : 350;
+                return await HidReports.Exchange(input, output, report, Log, token, timeoutMs) ?? throw new TimeoutException("HID response timeout.");
             }
             if (args is ["--status"])
-                Log($"hardware VOL={await Request(HidReports.Query)}");
+                Log($"hardware VOL={await Request(HidReports.Query, stop)}");
             else
                 await Sync.Run(hid, audio, Request, Log, args is ["--low-test"], stop, showVolume, CheckRoute);
         }

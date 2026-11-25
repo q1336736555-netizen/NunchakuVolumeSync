@@ -9,7 +9,7 @@ internal static class Sync
     private readonly record struct Change(Origin Source, long Received);
     private static int Percent(float value) => Math.Clamp((int)Math.Round(value * 100, MidpointRounding.AwayFromZero), 0, 100);
 
-    internal static async Task Run(string hid, AudioEndpointVolume audio, Func<byte[], Task<int>> request,
+    internal static async Task Run(string hid, AudioEndpointVolume audio, Func<byte[], CancellationToken, Task<int>> request,
         Action<string> log, bool lowTest, CancellationToken stop, Action<int>? showVolume, Action checkRoute)
     {
         var events = Channel.CreateBounded<Change>(new BoundedChannelOptions(1)
@@ -47,25 +47,45 @@ internal static class Sync
             log($"hardware->Windows VOL={hardware} Windows={Percent(audio.MasterVolumeLevelScalar)} dB={audio.MasterVolumeLevel:F2} mute={audio.Mute}");
             showVolume?.Invoke(hardware);
         }
-        async Task<int> ReadHardware()
+        async Task<int> ReadHardware(CancellationToken token)
         {
             for (int attempt = 1; ; attempt++)
             {
-                try { return await request(HidReports.Query); }
+                try { return await request(HidReports.Query, token); }
                 catch (TimeoutException) when (!lowTest)
                 {
                     log($"Volume query timed out (attempt {attempt}). Retrying on the current endpoint.");
-                    await Task.Delay(100, stop);
+                    await Task.Delay(100, token);
                 }
             }
+        }
+        async Task<int?> ReadUnlessSuperseded()
+        {
+            if (lowTest) return await ReadHardware(stop);
+            if (events.Reader.TryPeek(out _)) return null;
+            using var pending = CancellationTokenSource.CreateLinkedTokenSource(stop);
+            var change = events.Reader.WaitToReadAsync(pending.Token).AsTask();
+            var read = ReadHardware(pending.Token);
+            try
+            {
+                if (await Task.WhenAny(read, change) == change)
+                    pending.Cancel();
+                return await read;
+            }
+            catch (OperationCanceledException) when (!stop.IsCancellationRequested && pending.IsCancellationRequested)
+            {
+                return null;
+            }
+            finally { pending.Cancel(); }
         }
         var listener = Listen();
         audio.OnVolumeNotification += OnWindows;
         try
         {
-            int hardware = await ReadHardware();
+            int initial = await ReadHardware(stop);
+            int? hardware = initial;
             if (lowTest && hardware > 10) throw new IOException("Low-volume test requires hardware VOL <= 10.");
-            if (!events.Reader.TryPeek(out _)) Display(hardware);
+            if (!events.Reader.TryPeek(out _)) Display(initial);
             log($"READY limit={(lowTest ? 10 : 100)}");
             while (await events.Reader.WaitToReadAsync(stop))
             {
@@ -73,23 +93,24 @@ internal static class Sync
                 if (!events.Reader.TryRead(out var change)) continue;
                 if (change.Source == Origin.Knob)
                 {
-                    hardware = await ReadHardware();
+                    hardware = await ReadUnlessSuperseded();
                     // A newer user action wins if it arrived during the round trip.
-                    if (!events.Reader.TryPeek(out _)) Display(hardware);
+                    if (hardware is int level && !events.Reader.TryPeek(out _)) Display(level);
                     continue;
                 }
                 int target = Percent(audio.MasterVolumeLevelScalar);
                 if (lowTest && target > 10)
                 {
-                    hardware = await ReadHardware();
-                    if (!events.Reader.TryPeek(out _)) Display(hardware);
+                    hardware = await ReadHardware(stop);
+                    if (!events.Reader.TryPeek(out _)) Display(hardware.Value);
                     continue;
                 }
                 if (target == hardware)
                 {
                     // A mute-only or duplicate event usually needs no write. A concurrent knob change
                     // might have overwritten the previous state before its notification was processed.
-                    hardware = await ReadHardware();
+                    hardware = await ReadUnlessSuperseded();
+                    if (hardware is null) continue;
                     log($"Windows event level={target} mute={audio.Mute} hardware={hardware}");
                     if (target == hardware) continue;
                 }
@@ -99,21 +120,22 @@ internal static class Sync
                     if (events.Reader.TryPeek(out _) || Percent(audio.MasterVolumeLevelScalar) != target) break;
                     int? feedback = null;
                     var issuing = Stopwatch.GetTimestamp();
-                    try { feedback = await request(HidReports.SetVolume(target)); }
+                    try { feedback = await request(HidReports.SetVolume(target), stop); }
                     catch (TimeoutException) { log("SET timed out. Reading hardware volume before retrying."); }
                     double toFeedback = Stopwatch.GetElapsedTime(change.Received).TotalMilliseconds;
-                    hardware = await ReadHardware();
+                    hardware = await ReadUnlessSuperseded();
+                    if (hardware is null) break;
                     double toIssue = Stopwatch.GetElapsedTime(change.Received, issuing).TotalMilliseconds;
                     log($"Windows->hardware target={target} feedback={feedback?.ToString() ?? "missing"} readback={hardware} eventToIssueMs={toIssue:F2} eventToFeedbackMs={toFeedback:F2}");
                     if (hardware == target)
                     {
-                        showVolume?.Invoke(hardware);
+                        showVolume?.Invoke(hardware.Value);
                         break;
                     }
                     if (events.Reader.TryPeek(out _) || Percent(audio.MasterVolumeLevelScalar) != target) break;
                     if (feedback.HasValue || attempt >= 3)
                     {
-                        Display(hardware);
+                        Display(hardware.Value);
                         throw new IOException("Independent readback differs from target.");
                     }
                 }
