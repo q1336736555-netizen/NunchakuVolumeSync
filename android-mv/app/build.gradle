@@ -1,0 +1,31 @@
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' }
+}
+plugins { id 'com.android.application' version '9.3.2' }
+android {
+    namespace 'cn.local.mv'
+    compileSdk 37
+    defaultConfig {
+        applicationId 'cn.local.mv'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '0.1'
+        testInstrumentationRunner 'cn.local.mv.test.PlaybackProbe'
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+dependencies {
+    implementation 'com.github.ostrichbat2k:libusbdac:v0.3.0'
+    implementation 'androidx.media3:media3-exoplayer:1.11.0'
+    implementation 'androidx.media3:media3-datasource-okhttp:1.11.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.media3:media3-ui:1.11.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+}
